@@ -1,6 +1,8 @@
 from __future__ import annotations
 import numpy as np
-from typing import List, Union, Optional, Tuple
+from typing import Optional, Tuple
+
+from xpgrad import autograd
 
 # TODO:
 
@@ -17,7 +19,9 @@ class Function:
         fn = cls()
         out = Tensor(fn.forward(*[t.data for t in x], **options))
         out.requires_grad = any(t.requires_grad for t in x)
-        if out.requires_grad: fn.parents, out.grad_fn = x, fn
+        # here we added the autograd flag
+        if autograd.is_enabled() and any(t.requires_grad for t in x):
+            fn.parents, out.grad_fn, out.requires_grad = x, fn, True
         return out
     def __repr__(self): return "<{}>".format(type(self))
     def forward(self, *xs: np.ndarray, **options) -> np.ndarray: raise NotImplementedError("Forward is not implemented for {}".format(type(self).__name__))
@@ -36,6 +40,7 @@ class Tensor:
         self.grad:Optional['Tensor'] = None
         self.grad_fn:Optional[Function] = None
         self.requires_grad = requires_grad
+    def __repr__(self): return "Tensor(data={}, grad={}, grad_fn={})".format(self.data, self.grad, self.grad_fn)
     @property
     def dtype(self): return self.data.dtype
     @property
@@ -67,37 +72,6 @@ class Tensor:
     def tanh(self) -> "Tensor": return Tanh.apply(self)
     def sigmoid(self) -> "Tensor": return Sigmoid.apply(self)
     def exp(self) -> "Tensor": return Exp.apply(self)
-    def topowalk(self) -> List['Tensor']:
-        def _topowalk(node, visited):
-            visited.add(node)
-            if getattr(node, "grad_fn", None):
-                for p in node.grad_fn.parents:
-                    if p not in visited:
-                        yield from _topowalk(p, visited)
-                yield node
-        return list(_topowalk(self, set()))
-    def backward(self) -> None:
-        if self.grad_fn is None:
-            return
-        if self.grad is None:
-            assert self.data.size == 1, "grad can only be implicitly created for scalar tensors"
-            self.grad = Tensor(1.0, requires_grad=False)
-
-        assert self.grad is not None
-
-        for tt in reversed(self.topowalk()):
-            if tt.grad is None: raise ValueError("{} grad is None".format(tt))
-            assert tt.grad_fn is not None, "{} grad_fn is None".format(tt)
-            grads = tt.grad_fn.backward(tt.grad.data)
-            grads = [Tensor(g, requires_grad=False) if g is not None else None for g in ([grads] if not isinstance(grads, (List, Tuple)) else grads)]
-            for parent, grad in zip(tt.grad_fn.parents, grads):
-                if grad is not None and parent.requires_grad:
-                    assert grad.shape == parent.shape, "grad shape must match tensor: %r != %r" % (grad.shape, parent.data.shape, )
-                    parent.grad = grad if parent.grad is None else parent.grad + grad
-            # commented out temporarily causes __repr__ error on backward()
-            # del tt.grad_fn
-            tt.grad_fn = None
-    def __repr__(self): return "Tensor(data={}, grad={}, grad_fn={})".format(self.data, self.grad, self.grad_fn)
     def reshape(self, *shape):
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)): shape = tuple(shape[0])
         return Reshape.apply(self, shape=shape)
@@ -105,6 +79,10 @@ class Tensor:
     def permute(self, *axes) -> "Tensor": return Permute.apply(self, axes=axes)
     def item(self) -> float: return self.data.item()
     def tolist(self): return self.data.tolist()
+    # and here is the refactored version of backward
+    def backward(self, grad=None) -> None:
+        for leaf, g in autograd.backward(self, None if grad is None else _tensor(grad).data):
+            leaf.grad = Tensor(g) if leaf.grad is None else Tensor(leaf.grad.data + g)
 
 def unbroadcast(g: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
     while g.ndim > len(shape): g = g.sum(axis=0)
