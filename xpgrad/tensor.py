@@ -1,9 +1,8 @@
 from __future__ import annotations
 import numpy as np
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Tuple
 
 # TODO:
-# (1) add more functions
 
 # this level of abstraction is nearly killing the machine.
 # like this a lot? :3, i mean its really runtime dependent
@@ -11,23 +10,21 @@ from typing import List, Union, Optional
 # but the beauty is inside of it. I see this way kinda
 
 class Function:
-    def __init__(self, *x:'Tensor'):
-        super().__init__()
-        self.required_grads = tuple(t.requires_grad for t in x)
-        self.requires_grad = True if any(t.requires_grad for t in x) else (None if None in self.required_grads else False)
-        if self.requires_grad: self.parents = x
+    def __init__(self):
+        self.parents: Tuple[Tensor, ...] = ()
     @classmethod
-    def apply(cls, *x:'Tensor'):
-        fnc = cls(*x)
-        t = Tensor.__new__(Tensor)
-        t.data = fnc.forward(*[tens.data for tens in x])
-        t.grad = None
-        t.grad_fn = fnc if fnc.requires_grad else None
-        t.requires_grad = fnc.requires_grad
-        return t
+    def apply(cls, *x:"Tensor") -> "Tensor":
+        fn = cls()
+        out = Tensor(fn.forward(*[t.data for t in x]))
+        out.requires_grad = any(t.requires_grad for t in x)
+        if out.requires_grad: fn.parents, out.grad_fn = x, fn
+        return out
     def __repr__(self): return "<{}>".format(type(self))
-    def forward(self, *_) -> "Tensor": raise NotImplementedError("Forward is not implemented for {}".format(type(self)))
-    def backward(self, *_) -> "Tensor": raise NotImplementedError("Backward is not implemented for {}".format(type(self)))
+    def forward(self, *xs: np.ndarray) -> np.ndarray: raise NotImplementedError("Forward is not implemented for {}".format(type(self).__name__))
+    def backward(self, g: np.ndarray) -> Tuple[Optional[np.ndarray], ...]: raise NotImplementedError("Backward is not implemented for {}".format(type(self).__name__))
+
+def _tensor(x):
+    return x if isinstance(x, Tensor) else Tensor(x)
 
 class Tensor:
     __slots__ = ("data", "grad", "grad_fn", "requires_grad")
@@ -46,19 +43,28 @@ class Tensor:
     def shape(self): return self.data.shape
     @property
     def T(self): return self.assign(self.data.T)
-    def __add__(self, x) -> "Tensor": return self.add(x)
-    def __mul__(self, x) -> "Tensor": return self.dot(x)
-    def __matmul__(self, x) -> "Tensor": return self.matmul(x)
     # binary ops
-    def add(self, x) -> "Tensor": return Add.apply(self, x)
-    def mul(self, x) -> "Tensor": return Mul.apply(self, x)
-    def dot(self, x) -> "Tensor": return Dot.apply(self, x)
-    def matmul(self, x) -> "Tensor": return MatMul.apply(self, x)
+    def add(self, x) -> "Tensor": return Add.apply(self, _tensor(x))
+    def mul(self, x) -> "Tensor": return Mul.apply(self, _tensor(x))
+    def matmul(self, x) -> "Tensor": return MatMul.apply(self, _tensor(x))
+    # operators, composed from above so they wont' require backward of their own
+    def __add__(self, x) -> "Tensor": return self.add(x)
+    def __radd(self, x) -> "Tensor": return _tensor(x).add(self)
+    def __mul__(self, x) -> "Tensor": return self.mul(x)
+    def __rmul__(self, x) -> "Tensor": return _tensor(x).mul(self)
+    def __matmul__(self, x) -> "Tensor": return self.matmul(_tensor(x))
+    def __neg__(self) -> "Tensor": return self.mul(-1.0)
+    def __sub__(self, x) -> "Tensor": return self.add(-_tensor(x))
+    def __rsub__(self, x) -> "Tensor": return _tensor(x).add(-self)
+    def __truediv__(self, x) -> "Tensor": return self.mul(_tensor(x).reciprocal())
+    def __rtruediv__(self, x) -> "Tensor": return _tensor(x).mul(self.reciprocal())
     # Unary ops
     def sum(self) -> "Tensor": return Sum.apply(self)
+    def reciprocal(self) -> "Tensor": return Reciprocal.apply(self)
     def relu(self) -> "Tensor": return ReLU.apply(self)
     def tanh(self) -> "Tensor": return Tanh.apply(self)
-    def sig(self) -> "Tensor": return Sig.apply(self)
+    def sigmoid(self) -> "Tensor": return Sigmoid.apply(self)
+    def exp(self) -> "Tensor": return Exp.apply(self)
     def topowalk(self) -> List['Tensor']:
         def _topowalk(node, visited):
             visited.add(node)
@@ -68,7 +74,7 @@ class Tensor:
                         yield from _topowalk(p, visited)
                 yield node
         return list(_topowalk(self, set()))
-    def backward(self):
+    def backward(self) -> None:
         if self.grad_fn is None:
             return
         if self.grad is None:
@@ -80,80 +86,55 @@ class Tensor:
         for tt in reversed(self.topowalk()):
             if tt.grad is None: raise ValueError("{} grad is None".format(tt))
             assert tt.grad_fn is not None, "{} grad_fn is None".format(tt)
-            grads = tt.grad_fn.backward(tt.grad)
-            grads = [Tensor(g, requires_grad=False) if g is not None else None for g in ([grads] if not isinstance(grads, (list, tuple)) else grads)]
+            grads = tt.grad_fn.backward(tt.grad.data)
+            grads = [Tensor(g, requires_grad=False) if g is not None else None for g in ([grads] if not isinstance(grads, (List, Tuple)) else grads)]
             for parent, grad in zip(tt.grad_fn.parents, grads):
                 if grad is not None and parent.requires_grad:
                     assert grad.shape == parent.shape, "grad shape must match tensor: %r != %r" % (grad.shape, parent.data.shape, )
                     parent.grad = grad if parent.grad is None else parent.grad + grad
-            del tt.grad_fn
-        return self
+            # commented out temporarily causes __repr__ error on backward()
+            # del tt.grad_fn
+            tt.grad_fn = None
     def __repr__(self): return "Tensor(data={}, grad={}, grad_fn={})".format(self.data, self.grad, self.grad_fn)
     def assign(self, x): del self.data; self.data = x
     def reshape(self, *shape): return self.assign(self.data.reshape(*shape))
     def view(self, *shape): return self.reshape(*shape)
     def tolist(self): return self.data.tolist()
 
-class Mul(Function):
-    def forward(self, x, y):
-        self.x, self.y = Tensor(x), Tensor(y)
-        return x * y
-    def backward(self, grad):
-        return self.y.data * grad.data if self.required_grads[0] else None, \
-                self.x.data * grad.data if self.required_grads[1] else None
 
 class Add(Function):
-    def forward(self, x, y):
-        self.x, self.y = Tensor(x), Tensor(y)
-        return x + y
-    def backward(self, grad):
-        return grad.data if self.required_grads[0] else None, \
-                grad.data if self.required_grads[1] else None
+    def forward(self, x, y): return x + y
+    def backward(self, g): return g, g
 
-class Dot(Function):
-    def forward(self, x, y):
-        self.x, self.y = Tensor(x), Tensor(y)
-        return x.dot(y)
-    def backward(self, grad):
-        return grad.data.dot(self.y.data.T) if self.required_grads[0] else None, \
-                grad.data.T.dot(self.x.data).T if self.required_grads[1] else None
+class Mul(Function):
+    def forward(self, x, y): self.x, self.y = x, y; return x * y
+    def backward(self, g): return g * self.y, g * self.x
+
+class Reciprocal(Function):
+    def forward(self, x): self.out = 1.0 / x; return self.out
+    def backward(self, g): return (-g * self.out * self.out,)
 
 class MatMul(Function):
-    def forward(self, x, y):
-        self.x, self.y = Tensor(x), Tensor(y)
-        return np.matmul(x, y)
-    def backward(self, grad):
-        return np.matmul(grad.data, self.y.data.T) if self.required_grads[0] else None, \
-                np.matmul(self.x.data.T, grad.data) if self.required_grads[1] else None
+    def forward(self, x, y): self.x, self.y = x, y; return x @ y
+    def backward(self, g): return g @ self.y.T, self.x.T @ g
 
 class Sum(Function):
-    def forward(self, x) -> np.ndarray:
-        self.shape = x.shape
-        return np.array([x.sum()])
-    def backward(self, grad):
-        return np.zeros(self.shape) + grad.data if self.required_grads[0] else None
+    def forward(self, x): self.shape = x.shape; return np.array([x.sum()])
+    def backward(self, g): return (np.broadcast_to(g, self.shape).copy(),)
 
 class ReLU(Function):
-    def forward(self, x):
-        self.x = Tensor(x)
-        return np.maximum(x, 0)
-    def backward(self, grad):
-        gx = grad.data.copy()
-        gx[self.x.data < 0] = 0
-        return gx if self.required_grads[0] else None
+    def forward(self, x): self.mask = x > 0; return np.maximum(x, 0)
+    def backward(self, g): return (g * self.mask,)
 
 class Tanh(Function):
-    def forward(self, x):
-        self.tx = Tensor(np.tanh(x))
-        return self.tx
-    def backward(self, grad):
-        return (1 - self.tx.data**2) * grad.data if self.required_grads[0] else None
+    def forward(self, x): self.out = np.tanh(x); return self.out
+    def backward(self, g): return (g * (1 - self.out * self.out),)
 
-class Sig(Function):
-    def forward(self, x: np.ndarray):
-        self.s = Tensor(1 / (1 + np.exp(-x)))
-        return self.s
-    def backward(self, grad):
-        return (self.s.data / (1 - self.s.data)) * grad.data if self.required_grads[0] else None
+class Sigmoid(Function):
+    def forward(self, x): self.out = 0.5 * (1 + np.tanh(0.5 * x)); return self.out # this one wins over 1 / (1 + exp(-x)) cz never overflows
+    def backward(self, g): return (g * self.out * (1 - self.out),)
 
+class Exp(Function):
+    def forward(self, x): self.out = np.exp(x); return self.out
+    def backward(self, g): return (g * self.out,)
 
