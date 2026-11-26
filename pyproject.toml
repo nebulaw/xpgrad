@@ -2,26 +2,18 @@
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+
 [project]
 name = "xpgrad"
-version = "0.1.0"
-description = "A small machine-learning library that runs anywhere, built to learn how everything works underneath"
+version = "0.0.1"
+description = "Personal machine-learning library"
 readme = "README.txt"
 requires-python = ">=3.8"
 dependencies = ["numpy"]
 
-[project.optional-dependencies]
-dev = ["ruff"]
-
 [tool.setuptools.packages.find]
 include = ["xpgrad*"]
 
-[tool.ruff]
-line-length = 120
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E701"]  # allow one-line `if x: y`, part of the compact style
-
 [tool.pyright]
 reportIncompatibleMethodOverride = false
+

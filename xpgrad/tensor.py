@@ -56,7 +56,7 @@ class Tensor:
     def matmul(self, x) -> "Tensor": return MatMul.apply(self, _tensor(x))
     # operators, composed from above so they wont' require backward of their own
     def __add__(self, x) -> "Tensor": return self.add(x)
-    def __radd(self, x) -> "Tensor": return _tensor(x).add(self)
+    def __radd__(self, x) -> "Tensor": return _tensor(x).add(self)
     def __mul__(self, x) -> "Tensor": return self.mul(x)
     def __rmul__(self, x) -> "Tensor": return _tensor(x).mul(self)
     def __matmul__(self, x) -> "Tensor": return self.matmul(_tensor(x))

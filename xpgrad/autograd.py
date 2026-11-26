@@ -20,14 +20,11 @@ def toposort(root):
     order, seen, stack = [], set(), [(root, False)]
     while stack:
         node, inputs_done = stack.pop()
-        if inputs_done:
-            order.append(node)
-            continue
+        if inputs_done: order.append(node); continue
         if id(node) in seen: continue
         seen.add(id(node))
         stack.append((node, True))
-        if node.grad_fn is not None:
-            stack.extend((p, False) for p in node.grad_fn.parents)
+        if node.grad_fn is not None: stack.extend((p, False) for p in node.grad_fn.parents)
     return order
 
 # this will return gradients of root with respect to every leaf in
