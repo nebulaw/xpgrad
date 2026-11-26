@@ -101,22 +101,38 @@ class Tensor:
     def view(self, *shape): return self.reshape(*shape)
     def tolist(self): return self.data.tolist()
 
+def unbroadcast(g: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
+    while g.ndim > len(shape): g = g.sum(axis=0)
+    for axis, n in enumerate(shape):
+        if n == 1 and g.shape[axis] != 1: g = g.sum(axis=axis, keepdims=True)
+    return g
 
 class Add(Function):
-    def forward(self, x, y): return x + y
-    def backward(self, g): return g, g
+    def forward(self, x, y):
+        self.x_shape, self.y_shape = x.shape, y.shape
+        return x + y
+    def backward(self, g):
+        return unbroadcast(g, self.x_shape), unbroadcast(g, self.y_shape)
 
 class Mul(Function):
-    def forward(self, x, y): self.x, self.y = x, y; return x * y
-    def backward(self, g): return g * self.y, g * self.x
+    def forward(self, x, y):
+        self.x, self.y = x, y
+        return x * y
+    def backward(self, g):
+        return unbroadcast(g * self.y, self.x.shape), unbroadcast(g * self.x, self.y.shape)
+
+class MatMul(Function):
+    def forward(self, x, y):
+        if x.ndim < 2 or y.ndim < 2: raise ValueError("matmul requires inputs to have 2 or more dims")
+        self.x, self.y = x, y
+        return x @ y
+    def backward(self, g):
+        xt, yt = np.swapaxes(self.x, -1, -2), np.swapaxes(self.y, -1, -2)
+        return unbroadcast(g @ yt, self.x.shape), unbroadcast(xt @ g, self.y.shape)
 
 class Reciprocal(Function):
     def forward(self, x): self.out = 1.0 / x; return self.out
     def backward(self, g): return (-g * self.out * self.out,)
-
-class MatMul(Function):
-    def forward(self, x, y): self.x, self.y = x, y; return x @ y
-    def backward(self, g): return g @ self.y.T, self.x.T @ g
 
 class Sum(Function):
     def forward(self, x): self.shape = x.shape; return np.array([x.sum()])
