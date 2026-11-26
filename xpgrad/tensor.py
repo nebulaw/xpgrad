@@ -13,27 +13,26 @@ class Function:
     def __init__(self):
         self.parents: Tuple[Tensor, ...] = ()
     @classmethod
-    def apply(cls, *x:"Tensor") -> "Tensor":
+    def apply(cls, *x:"Tensor", **options) -> "Tensor":
         fn = cls()
-        out = Tensor(fn.forward(*[t.data for t in x]))
+        out = Tensor(fn.forward(*[t.data for t in x], **options))
         out.requires_grad = any(t.requires_grad for t in x)
         if out.requires_grad: fn.parents, out.grad_fn = x, fn
         return out
     def __repr__(self): return "<{}>".format(type(self))
-    def forward(self, *xs: np.ndarray) -> np.ndarray: raise NotImplementedError("Forward is not implemented for {}".format(type(self).__name__))
+    def forward(self, *xs: np.ndarray, **options) -> np.ndarray: raise NotImplementedError("Forward is not implemented for {}".format(type(self).__name__))
     def backward(self, g: np.ndarray) -> Tuple[Optional[np.ndarray], ...]: raise NotImplementedError("Backward is not implemented for {}".format(type(self).__name__))
 
+DEFAULT_DTYPE=np.float32
 def _tensor(x):
     return x if isinstance(x, Tensor) else Tensor(x)
 
 class Tensor:
     __slots__ = ("data", "grad", "grad_fn", "requires_grad")
-    def __init__(self, data:Union[np.ndarray, int, float], requires_grad:Optional[bool]=None):
-        if isinstance(data, (int, float)): data = np.array([data])
-        elif isinstance(data, list): data = np.array(data)
-        elif isinstance(data, np.ndarray): data = data
-        else: assert False, "data must be of type: np.ndarray, int, float, list"
-        self.data = data
+    def __init__(self, data, requires_grad: bool = False):
+        if isinstance(data, Tensor): raise TypeError("data is already a Tensor")
+        floating = isinstance(data, (np.ndarray, np.generic)) and np.issubdtype(data.dtype, np.floating)
+        self.data: np.ndarray = np.asarray(data) if floating else np.asarray(data, dtype=DEFAULT_DTYPE)
         self.grad:Optional['Tensor'] = None
         self.grad_fn:Optional[Function] = None
         self.requires_grad = requires_grad
@@ -42,7 +41,10 @@ class Tensor:
     @property
     def shape(self): return self.data.shape
     @property
-    def T(self): return self.assign(self.data.T)
+    def ndim(self): return self.data.ndim
+    @property
+    def T(self) -> "Tensor": return self.permute(*reversed(range(self.ndim)))
+
     # binary ops
     def add(self, x) -> "Tensor": return Add.apply(self, _tensor(x))
     def mul(self, x) -> "Tensor": return Mul.apply(self, _tensor(x))
@@ -59,7 +61,7 @@ class Tensor:
     def __truediv__(self, x) -> "Tensor": return self.mul(_tensor(x).reciprocal())
     def __rtruediv__(self, x) -> "Tensor": return _tensor(x).mul(self.reciprocal())
     # Unary ops
-    def sum(self) -> "Tensor": return Sum.apply(self)
+    def sum(self, axis=None, keepdims=False) -> "Tensor": return Sum.apply(self, axis=axis, keepdims=keepdims)
     def reciprocal(self) -> "Tensor": return Reciprocal.apply(self)
     def relu(self) -> "Tensor": return ReLU.apply(self)
     def tanh(self) -> "Tensor": return Tanh.apply(self)
@@ -96,9 +98,12 @@ class Tensor:
             # del tt.grad_fn
             tt.grad_fn = None
     def __repr__(self): return "Tensor(data={}, grad={}, grad_fn={})".format(self.data, self.grad, self.grad_fn)
-    def assign(self, x): del self.data; self.data = x
-    def reshape(self, *shape): return self.assign(self.data.reshape(*shape))
-    def view(self, *shape): return self.reshape(*shape)
+    def reshape(self, *shape):
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)): shape = tuple(shape[0])
+        return Reshape.apply(self, shape=shape)
+    def view(self, *shape) -> "Tensor": return self.reshape(*shape)
+    def permute(self, *axes) -> "Tensor": return Permute.apply(self, axes=axes)
+    def item(self) -> float: return self.data.item()
     def tolist(self): return self.data.tolist()
 
 def unbroadcast(g: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
@@ -135,8 +140,20 @@ class Reciprocal(Function):
     def backward(self, g): return (-g * self.out * self.out,)
 
 class Sum(Function):
-    def forward(self, x): self.shape = x.shape; return np.array([x.sum()])
-    def backward(self, g): return (np.broadcast_to(g, self.shape).copy(),)
+    def forward(self, x, axis=None, keepdims=False):
+        self.in_shape, self.axis, self.keepdims = x.shape, axis, keepdims
+        return np.sum(x, axis=axis, keepdims=keepdims)
+    def backward(self, g):
+        if self.axis is not None and not self.keepdims: g = np.expand_dims(g, self.axis)
+        return (np.broadcast_to(g, self.in_shape).copy(),)
+
+class Reshape(Function):
+    def forward(self, x, shape): self.in_shape = x.shape; return x.reshape(shape)
+    def backward(self, g): return (g.reshape(self.in_shape),)
+
+class Permute(Function):
+    def forward(self, x, axes): self.inverse = np.argsort(axes); return np.transpose(x, axes)
+    def backward(self, g): return (np.transpose(g, self.inverse),)
 
 class ReLU(Function):
     def forward(self, x): self.mask = x > 0; return np.maximum(x, 0)
