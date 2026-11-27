@@ -39,6 +39,16 @@ class Tracer:
   def __rtruediv__(self, x): return self.reciprocal() * x # as well '*'
   def relu(self): return self.maximum(0.0)
   def sigmoid(self): return 0.5 * (1.0 + (0.5 * self).tanh())
+  # bools
+  def __lt__(self, y): return _binary(Op.CMPLT, self, y)
+  def __gt__(self, y): return _binary(Op.CMPLT, y, self)
+  def where(self, x, y):
+    dtype = x.dtype if isinstance(x, Tracer) else y.dtype if isinstance(y, Tracer) else "float32"
+    x, y = _lift(x, dtype), _lift(y, dtype)
+    shape = broadcast_shapes(self.shape, x.shape, y.shape)
+    return Tracer(node(Op.WHERE, *[t.broadcast_to(shape).node for t in (self, x, y)]))
+  def __bool__(self):
+    raise TypeError("traced value does not carry data at all, you can't use it in statements or elsewhere. Use where()")
 
 def _lift(x, dtype="float32") -> Tracer:
   if isinstance(x, Tracer): return x
