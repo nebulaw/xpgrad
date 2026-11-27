@@ -18,7 +18,7 @@ class Function:
     if autograd.is_enabled() and any(t.requires_grad for t in x):
       fn.parents, out.grad_fn, out.requires_grad = x, fn, True
     return out
-  def __repr__(self): return "<{}>".format(type(self))
+  def __repr__(self): return "<{}>".format(type(self).__name__)
 
 # unary/binary split for typechecking, options moved to the init
 class Unary(Function):

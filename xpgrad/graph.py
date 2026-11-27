@@ -92,8 +92,9 @@ def _einsum(spec, *xs):
   if len({x.dtype for x in xs}) != 1 or not set(out) <= set(sizes): raise ValueError("bad einsum {}".format(spec))
   return tuple(sizes[c] for c in out), xs[0].dtype
 
-def _cast(): return lambda dtype, x: (x.shape, dtype)
-def _cmplt(): return lambda attr, x, y: (_same(attr, x, y)[0], "bool")
+def _cast(dtype, x): return x.shape, dtype
+
+def _cmplt(attr, x, y): return _same(attr, x, y)[0], "bool"
 
 infer = {
   Op.EXP: _same,
