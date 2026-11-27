@@ -1,4 +1,5 @@
 
+# decided that it would be better to have classes jff
 class Optimizer:
   def __init__(self, params, lr):
     self.params, self.lr = list(params), lr
