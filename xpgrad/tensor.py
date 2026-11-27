@@ -1,25 +1,33 @@
 from __future__ import annotations
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 from xpgrad import autograd
 
 # I think the code is in base shape for now
 
 class Function:
-  def __init__(self):
-    self.parents: Tuple[Tensor, ...] = ()
+  parents: Tuple[Tensor, ...]
+  forward: Callable[..., np.ndarray]
+  backward: Callable[..., Tuple[np.ndarray, ...]]
   @classmethod
   def apply(cls, *x:"Tensor", **options) -> "Tensor":
-    fn = cls()
-    out = Tensor(fn.forward(*[t.data for t in x], **options))
+    fn = cls(**options)
+    out = Tensor(fn.forward(*[t.data for t in x]))
     # here we added the autograd flag
     if autograd.is_enabled() and any(t.requires_grad for t in x):
       fn.parents, out.grad_fn, out.requires_grad = x, fn, True
     return out
   def __repr__(self): return "<{}>".format(type(self))
-  def forward(self, *xs: np.ndarray, **options) -> np.ndarray: raise NotImplementedError("Forward is not implemented for {}".format(type(self).__name__))
-  def backward(self, g: np.ndarray) -> Tuple[Optional[np.ndarray], ...]: raise NotImplementedError("Backward is not implemented for {}".format(type(self).__name__))
+
+# unary/binary split for typechecking, options moved to the init
+class Unary(Function):
+  def forward(self, x:np.ndarray) -> np.ndarray: raise NotImplementedError
+  def backward(self, g:np.ndarray) -> Tuple[np.ndarray]: raise NotImplementedError
+
+class Binary(Function):
+  def forward(self, x:np.ndarray, y:np.ndarray) -> np.ndarray: raise NotImplementedError
+  def backward(self, g:np.ndarray) -> Tuple[np.ndarray, np.ndarray]: raise NotImplementedError
 
 DEFAULT_DTYPE=np.float32
 def _tensor(x):
@@ -43,7 +51,6 @@ class Tensor:
   def ndim(self): return self.data.ndim
   @property
   def T(self) -> "Tensor": return self.permute(*reversed(range(self.ndim)))
-
   # binary ops
   def add(self, x) -> "Tensor": return Add.apply(self, _tensor(x))
   def mul(self, x) -> "Tensor": return Mul.apply(self, _tensor(x))
@@ -84,21 +91,21 @@ def unbroadcast(g: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
     if n == 1 and g.shape[axis] != 1: g = g.sum(axis=axis, keepdims=True)
   return g
 
-class Add(Function):
+class Add(Binary):
   def forward(self, x, y):
     self.x_shape, self.y_shape = x.shape, y.shape
     return x + y
   def backward(self, g):
     return unbroadcast(g, self.x_shape), unbroadcast(g, self.y_shape)
 
-class Mul(Function):
+class Mul(Binary):
   def forward(self, x, y):
     self.x, self.y = x, y
     return x * y
   def backward(self, g):
     return unbroadcast(g * self.y, self.x.shape), unbroadcast(g * self.x, self.y.shape)
 
-class MatMul(Function):
+class MatMul(Binary):
   def forward(self, x, y):
     if x.ndim < 2 or y.ndim < 2: raise ValueError("matmul requires inputs to have 2 or more dims")
     self.x, self.y = x, y
@@ -107,39 +114,42 @@ class MatMul(Function):
     xt, yt = np.swapaxes(self.x, -1, -2), np.swapaxes(self.y, -1, -2)
     return unbroadcast(g @ yt, self.x.shape), unbroadcast(xt @ g, self.y.shape)
 
-class Reciprocal(Function):
+class Reciprocal(Unary):
   def forward(self, x): self.out = 1.0 / x; return self.out
   def backward(self, g): return (-g * self.out * self.out,)
 
-class Sum(Function):
-  def forward(self, x, axis=None, keepdims=False):
-    self.in_shape, self.axis, self.keepdims = x.shape, axis, keepdims
-    return np.sum(x, axis=axis, keepdims=keepdims)
+class Sum(Unary):
+  def __init__(self, axis=None, keepdims=False): self.axis, self.keepdims = axis, keepdims
+  def forward(self, x):
+    self.in_shape = x.shape
+    return np.sum(x, axis=self.axis, keepdims=self.keepdims)
   def backward(self, g):
     if self.axis is not None and not self.keepdims: g = np.expand_dims(g, self.axis)
     return (np.broadcast_to(g, self.in_shape).copy(),)
 
-class Reshape(Function):
-  def forward(self, x, shape): self.in_shape = x.shape; return x.reshape(shape)
+class Reshape(Unary):
+  def __init__(self, shape): self.shape = shape
+  def forward(self, x): self.in_shape = x.shape; return x.reshape(self.shape)
   def backward(self, g): return (g.reshape(self.in_shape),)
 
-class Permute(Function):
-  def forward(self, x, axes): self.inverse = np.argsort(axes); return np.transpose(x, axes)
+class Permute(Unary):
+  def __init__(self, axes): self.axes = axes
+  def forward(self, x): self.inverse = np.argsort(self.axes); return np.transpose(x, self.axes)
   def backward(self, g): return (np.transpose(g, self.inverse),)
 
-class ReLU(Function):
+class ReLU(Unary):
   def forward(self, x): self.mask = x > 0; return np.maximum(x, 0)
   def backward(self, g): return (g * self.mask,)
 
-class Tanh(Function):
+class Tanh(Unary):
   def forward(self, x): self.out = np.tanh(x); return self.out
   def backward(self, g): return (g * (1 - self.out * self.out),)
 
-class Sigmoid(Function):
+class Sigmoid(Unary):
   def forward(self, x): self.out = 0.5 * (1 + np.tanh(0.5 * x)); return self.out # this one wins over 1 / (1 + exp(-x)) cz never overflows
   def backward(self, g): return (g * self.out * (1 - self.out),)
 
-class Exp(Function):
+class Exp(Unary):
   def forward(self, x): self.out = np.exp(x); return self.out
   def backward(self, g): return (g * self.out,)
 

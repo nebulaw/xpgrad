@@ -1,5 +1,5 @@
 import math
-from typing import Iterator
+from typing import Callable, Iterator
 
 import numpy as np
 
@@ -15,8 +15,8 @@ def _walk(value):
     for v in value: yield from _walk(v)
 
 class Module:
+  forward: Callable[..., Tensor]
   def __call__(self, *x): return self.forward(*x)
-  def forward(self, *x): raise NotImplementedError("forward is not implemented for {}".format(type(self).__name__))
   def params(self) -> Iterator[Tensor]:
     seen = set()
     for p in _walk(self):
