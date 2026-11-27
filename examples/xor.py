@@ -18,7 +18,7 @@ model = nn.Sequential(
 )
 optim = Optimizer(model.params(), sgd(lr=1.0))
 
-# now let's learn twinkle star how to xor
+# now let's teach our twinkle star how to xor
 for step in range(0, 2005):
   err = model(x) - y
   loss = (err * err).sum() / 4

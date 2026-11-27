@@ -1,8 +1,8 @@
 # xpgrad
 
-this is a machine learning library that will run on any platform even Windows XP
+this is a machine learning library that will run on any platform even Windows XP. designed to be educative
 
-it was written on my old laptop with WindowsXP and without an internet connection in 2024. so basically its a gem for me :3
+! no, this won't run on any platform at least yet from 26 novemeber 2026
 
-it has similar api to pytorch or tinygrad and you can take a look at `test.py` for an example
+it has similar api to pytorch or tinygrad and you can take a look at `examples/`
 

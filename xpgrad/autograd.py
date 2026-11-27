@@ -4,7 +4,7 @@ import numpy as np
 
 # as the graph walking for counting gradients is the separate algorithm I'm moving
 # that calculation here. decided early before it grows up
-# it strips down recursive topowalk in Tensor so it is safer
+# it strips down recursive topowalk from Tensor so it is safer
 
 _enabled = True
 def is_enabled() -> bool: return _enabled
