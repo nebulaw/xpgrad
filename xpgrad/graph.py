@@ -7,10 +7,12 @@ from dataclasses import dataclass
 # this graph is for immutable nodes of prim ops.
 
 class Op(Enum):
-  VAR = auto()
-  ADD = auto(); MUL = auto()
+  VAR = auto(); CONST = auto() # leaves
+  EXP = auto(); LOG = auto(); SQRT = auto(); TANH = auto(); RECIP = auto(); CAST = auto()
+  ADD = auto(); MUL = auto(); MAX = auto(); CMPLT = auto(); WHERE = auto()
   SUM = auto(); RMAX = auto()
   RESHAPE = auto(); EXPAND = auto(); PERMUTE = auto()
+  EINSUM = auto()
 
 # node knows its shape and dtype the moment it was created
 @dataclass(frozen=True, eq=False, repr=False)
@@ -23,6 +25,7 @@ class Node:
   def __repr__(self): return "<{} {}{}>".format(self.op.name, self.dtype, list(self.shape))
 
 def var(name, shape, dtype="float32") -> Node: return Node(Op.VAR, (), name, tuple(shape), dtype)
+def const(value, dtype="float32") -> Node: return Node(Op.CONST, (), value, (), dtype)
 def node(op: Op, *srcs: Node, attr=None) -> Node:
   shape, dtype = infer[op](attr, *srcs)
   return Node(op, srcs, attr, shape, dtype)
@@ -73,10 +76,44 @@ def _permute(axes, x):
   if sorted(axes) != list(range(len(x.shape))): raise ValueError("{} is not a permutation for {}".format(axes, x))
   return tuple(x.shape[a] for a in axes), x.dtype
 
+def _where(attr, c, x, y):
+  if c.dtype != "bool" or c.shape != x.shape: raise ValueError("where needs a bool condition shaped like x")
+  return _same(attr, x, y)
+
+def _einsum(spec, *xs):
+  ins, out = spec.split("->")
+  if len(ins.split(",")) != len(xs): raise ValueError("{} needs {} inputs".format(spec, len(ins.split(","))))
+  sizes = {}
+  for letters, x in zip(ins.split(","), xs):
+    if len(letters) != len(x.shape):
+      raise ValueError("{} doesn't match {}".format(letters, x))
+    for c, n in zip(letters, x.shape):
+      if sizes.setdefault(c, n) != n: raise ValueError("axis {} is both {} and {}".format(c, sizes[c], n))
+  if len({x.dtype for x in xs}) != 1 or not set(out) <= set(sizes): raise ValueError("bad einsum {}".format(spec))
+  return tuple(sizes[c] for c in out), xs[0].dtype
+
+def _cast(): return lambda dtype, x: (x.shape, dtype)
+def _cmplt(): return lambda attr, x, y: (_same(attr, x, y)[0], "bool")
+
 infer = {
-  Op.ADD: _same, Op.MUL: _same,
-  Op.SUM: _reduce, Op.RMAX: _reduce,
-  Op.RESHAPE: _reshape, Op.EXPAND: _expand, Op.PERMUTE: _permute,
+  Op.EXP: _same,
+  Op.LOG: _same,
+  Op.TANH: _same,
+  Op.RECIP: _same,
+  Op.SQRT: _same,
+  Op.CAST: _cast,
+  Op.ADD: _same,
+  Op.MUL: _same,
+  Op.MAX: _same,
+  Op.CMPLT: _cmplt,
+  Op.WHERE: _where,
+  Op.SUM: _reduce,
+  Op.RMAX: _reduce,
+  Op.RESHAPE: _reshape,
+  Op.EXPAND: _expand,
+  Op.PERMUTE: _permute,
+  Op.EINSUM: _einsum,
 }
+if set(infer) | {Op.VAR, Op.CONST} != set(Op): raise RuntimeError("ops without shape rules")
 
 
