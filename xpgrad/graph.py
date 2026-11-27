@@ -27,6 +27,7 @@ class Node:
 def var(name, shape, dtype="float32") -> Node: return Node(Op.VAR, (), name, tuple(shape), dtype)
 def const(value, dtype="float32") -> Node: return Node(Op.CONST, (), value, (), dtype)
 def node(op: Op, *srcs: Node, attr=None) -> Node:
+  _check_inputs(op, srcs)
   shape, dtype = infer[op](attr, *srcs)
   return Node(op, srcs, attr, shape, dtype)
 
@@ -69,6 +70,7 @@ def _expand(shape, x):
   return tuple(shape), x.dtype
 
 def _reshape(shape, x):
+  if any(s < 0 for s in shape): raise ValueError("can't reshape {} to {} due to negative axes".format(x.shape, shape))
   if prod(shape) != prod(x.shape): raise ValueError("can't reshape {} from {} to {}".format(x, x.shape, shape))
   return tuple(shape), x.dtype
 
@@ -89,32 +91,35 @@ def _einsum(spec, *xs):
       raise ValueError("{} doesn't match {}".format(letters, x))
     for c, n in zip(letters, x.shape):
       if sizes.setdefault(c, n) != n: raise ValueError("axis {} is both {} and {}".format(c, sizes[c], n))
-  if len({x.dtype for x in xs}) != 1 or not set(out) <= set(sizes): raise ValueError("bad einsum {}".format(spec))
+  if len(set(out)) != len(out) or len({x.dtype for x in xs}) != 1 or not set(out) <= set(sizes): raise ValueError("bad einsum {}".format(spec))
   return tuple(sizes[c] for c in out), xs[0].dtype
 
 def _cast(dtype, x): return x.shape, dtype
 
 def _cmplt(attr, x, y): return _same(attr, x, y)[0], "bool"
 
+# TODO: safety check so no ops will get there, and for ARITY too
 infer = {
-  Op.EXP: _same,
-  Op.LOG: _same,
-  Op.TANH: _same,
-  Op.RECIP: _same,
-  Op.SQRT: _same,
-  Op.CAST: _cast,
-  Op.ADD: _same,
-  Op.MUL: _same,
-  Op.MAX: _same,
-  Op.CMPLT: _cmplt,
-  Op.WHERE: _where,
-  Op.SUM: _reduce,
-  Op.RMAX: _reduce,
-  Op.RESHAPE: _reshape,
-  Op.EXPAND: _expand,
-  Op.PERMUTE: _permute,
+  Op.EXP: _same, Op.LOG: _same, Op.TANH: _same, Op.RECIP: _same, Op.SQRT: _same, Op.CAST: _cast,
+  Op.ADD: _same, Op.MUL: _same, Op.MAX: _same, Op.CMPLT: _cmplt, Op.WHERE: _where,
+  Op.SUM: _reduce, Op.RMAX: _reduce,
+  Op.RESHAPE: _reshape, Op.EXPAND: _expand, Op.PERMUTE: _permute,
   Op.EINSUM: _einsum,
 }
-if set(infer) | {Op.VAR, Op.CONST} != set(Op): raise RuntimeError("ops without shape rules")
 
+# a bit of tinygrad style George is OG
+# TODO: einsum for later
+UNARY = {Op.EXP, Op.LOG, Op.TANH, Op.RECIP, Op.SQRT}
+BINARY = {Op.ADD, Op.MUL, Op.MUL, Op.MAX, Op.CMPLT}
+ARITY = {
+  **{op: 1 for op in UNARY | {Op.CAST, Op.SUM, Op.RMAX, Op.EXPAND, Op.RESHAPE, Op.PERMUTE}},
+  **{op: 2 for op in BINARY},
+  Op.WHERE: 3
+}
+
+def _check_inputs(op, srcs):
+  if op in ARITY and len(srcs) != ARITY[op]:
+    raise ValueError("{} takes {} inputs and got {}".format(op.name, ARITY[op], len(srcs)))
+  if op in UNARY and "float" not in srcs[0].dtype:
+    raise ValueError("{} requires float input and got {}".format(op.name, srcs[0]))
 
