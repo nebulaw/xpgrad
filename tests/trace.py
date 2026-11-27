@@ -12,3 +12,7 @@ print("-" * 24 * 2)
 def bar(x, b): return 2.0 * x + b
 print(show(trace(bar, var("x", (2,3)), var("b", (3,)))))
 
+print("-" * 24 * 2)
+print(show(trace(lambda x: x.sigmoid(), var("z", (3,)))))
+print("-" * 24 * 2)
+print(show(trace(lambda x, y: x - y, var("w", (3,)), var("y", (3,)))))

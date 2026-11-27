@@ -10,6 +10,7 @@ class Tracer:
   def dtype(self): return self.node.dtype
   @property
   def ndim(self): return len(self.node.shape)
+  # primitives
   def __repr__(self): return "Tracer({})".format(self.node)
   def __add__(self, x): return _binary(Op.ADD, self, x)
   def __radd__(self, x): return _binary(Op.ADD, x, self)
@@ -22,6 +23,22 @@ class Tracer:
     if x.ndim < len(shape): x = x.reshape((1,) * (len(shape) - x.ndim) + x.shape)
     if x.shape != shape: x = x.expand(shape)
     return x
+  # element-wise prims
+  def exp(self): return Tracer(node(Op.EXP, self.node))
+  def log(self): return Tracer(node(Op.LOG, self.node))
+  def sqrt(self): return Tracer(node(Op.SQRT, self.node))
+  def tanh(self): return Tracer(node(Op.TANH, self.node))
+  def reciprocal(self): return Tracer(node(Op.RECIP, self.node))
+  def cast(self, dtype): return Tracer(node(Op.CAST, self.node, attr=dtype))
+  def maximum(self, x): return _binary(Op.MAX, self, x)
+  # composed ones
+  def __neg__(self): return self * -1.0
+  def __sub__(self, x): return self + -_lift(x, self.dtype)
+  def __rsub__(self, x): return -self + x # '+' will lift x if necessary
+  def __truediv__(self, x): return self * _lift(x, self.dtype).reciprocal()
+  def __rtruediv__(self, x): return self.reciprocal() * x # as well '*'
+  def relu(self): return self.maximum(0.0)
+  def sigmoid(self): return 0.5 * (1.0 + (0.5 * self).tanh())
 
 def _lift(x, dtype="float32") -> Tracer:
   if isinstance(x, Tracer): return x
