@@ -110,16 +110,24 @@ infer = {
 # a bit of tinygrad style George is OG
 # TODO: einsum for later
 UNARY = {Op.EXP, Op.LOG, Op.TANH, Op.RECIP, Op.SQRT}
-BINARY = {Op.ADD, Op.MUL, Op.MUL, Op.MAX, Op.CMPLT}
+BINARY = {Op.ADD, Op.MUL, Op.MAX, Op.CMPLT}
+NUMERIC = {Op.ADD, Op.MUL, Op.MAX, Op.SUM, Op.RMAX} # non-bools added
 ARITY = {
   **{op: 1 for op in UNARY | {Op.CAST, Op.SUM, Op.RMAX, Op.EXPAND, Op.RESHAPE, Op.PERMUTE}},
   **{op: 2 for op in BINARY},
   Op.WHERE: 3
 }
 
+# checker for ops that was added without its own rules
+_ops = set(Op) - {Op.VAR, Op.CONST}
+_missing = (_ops - set(infer)) | (_ops - {Op.EINSUM} - set(ARITY))
+if _missing: raise RuntimeError("ops without rules: {}".format(sorted(o.name for o in _missing)))
+
 def _check_inputs(op, srcs):
   if op in ARITY and len(srcs) != ARITY[op]:
     raise ValueError("{} takes {} inputs and got {}".format(op.name, ARITY[op], len(srcs)))
   if op in UNARY and "float" not in srcs[0].dtype:
     raise ValueError("{} requires float input and got {}".format(op.name, srcs[0]))
+  if op in NUMERIC and any(s.dtype == "bool" for s in srcs):
+    raise ValueError("{} can't take bool input and got {}".format(op.name, list(srcs)))
 

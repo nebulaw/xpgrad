@@ -72,7 +72,6 @@ class Tracer:
     b = "abcdefgh"[:len(shapes)]
     return Tracer(node(Op.EINSUM, x.node, y.node, attr="{0}ij,{0}jk->{0}ik".format(b)))
 
-
 def _lift(x, dtype="float32") -> Tracer:
   if isinstance(x, Tracer): return x
   if isinstance(x, (bool, int, float)): return Tracer(const(x, dtype))
