@@ -10,17 +10,19 @@ class Op(Enum):
   ADD = auto()
   MUL = auto()
 
-
+# node knows its shape and dtype the moment it was created
 @dataclass(frozen=True)
 class Node:
   op: Op
   srcs: Tuple[Node, ...]
   attr: Any
+  shape: Tuple[int, ...]
+  dtype: str
 
-def var(name) -> Node: return Node(Op.VAR, (), name)
+def var(name, shape, dtype="float32") -> Node: return Node(Op.VAR, (), name, tuple(shape), dtype)
 def node(op: Op, *srcs: Node, attr=None) -> Node:
-  return Node(op, srcs, attr)
-
+  shape, dtype = infer[op](attr, *srcs)
+  return Node(op, srcs, attr, shape, dtype)
 
 def toposort(*roots: Node) -> List[Node]:
   order, seen, stack = [], set(), [(r, False) for r in reversed(roots)]
@@ -36,11 +38,23 @@ def toposort(*roots: Node) -> List[Node]:
 def show(*roots: Node) -> str:
   order = toposort(*roots)
   name = {n: "v{}".format(i) for i, n in enumerate(order)}
-  return "\n".join("{} = {}{} {}".format(
+  return "\n".join("{} : {}{} = {}{} {}".format(
     name[n],
+    n.dtype,
+    list(n.shape),
     n.op.name.lower(),
     "" if n.attr is None else "[{}]".format(n.attr),
     " ".join(name[s] for s in n.srcs)).rstrip() for n in order
   )
+
+def _same(attr, *xs):
+  if len({(x.shape, x.dtype) for x in xs}) != 1:
+    raise ValueError("inputs need equal shapes and dtypes, got {}".format(list(xs)))
+  return xs[0].shape, xs[0].dtype
+
+infer = {
+  Op.ADD: _same,
+  Op.MUL: _same
+}
 
 
