@@ -4,6 +4,7 @@ from xpgrad.graph import Node, node, Op, const
 
 # tracer records every op it has as a graph
 class Tracer:
+  __array_ufunc__ = None # hand operators back to us, we own them!
   def __init__(self, n: Node): self.node = n
   @property
   def shape(self): return self.node.shape
@@ -43,8 +44,8 @@ class Tracer:
   # bools
   def __lt__(self, y): return _binary(Op.CMPLT, self, y)
   def __gt__(self, y): return _binary(Op.CMPLT, y, self)
-  def where(self, x, y):
-    dtype = x.dtype if isinstance(x, Tracer) else y.dtype if isinstance(y, Tracer) else "float32"
+  def where(self, x, y, dtype="float32"):
+    dtype = x.dtype if isinstance(x, Tracer) else y.dtype if isinstance(y, Tracer) else dtype
     x, y = _lift(x, dtype), _lift(y, dtype)
     shape = broadcast_shapes(self.shape, x.shape, y.shape)
     return Tracer(node(Op.WHERE, *[t.broadcast_to(shape).node for t in (self, x, y)]))

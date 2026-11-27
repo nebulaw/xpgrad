@@ -35,6 +35,7 @@ def _tensor(x):
 
 class Tensor:
   __slots__ = ("data", "grad", "grad_fn", "requires_grad")
+  __array_ufunc__ = None # to numpy hand back operators
   def __init__(self, data, requires_grad: bool = False):
     if isinstance(data, Tensor): raise TypeError("data is already a Tensor")
     floating = isinstance(data, (np.ndarray, np.generic)) and np.issubdtype(data.dtype, np.floating)
@@ -61,6 +62,7 @@ class Tensor:
   def __mul__(self, x) -> "Tensor": return self.mul(x)
   def __rmul__(self, x) -> "Tensor": return _tensor(x).mul(self)
   def __matmul__(self, x) -> "Tensor": return self.matmul(_tensor(x))
+  def __rmatmul__(self, x) -> "Tensor": return _tensor(x).matmul(self)
   def __neg__(self) -> "Tensor": return self.mul(-1.0)
   def __sub__(self, x) -> "Tensor": return self.add(-_tensor(x))
   def __rsub__(self, x) -> "Tensor": return _tensor(x).add(-self)
