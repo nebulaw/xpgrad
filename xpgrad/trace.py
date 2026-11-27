@@ -1,3 +1,4 @@
+from math import prod
 from xpgrad.graph import Node, node, Op, const
 
 
@@ -49,6 +50,28 @@ class Tracer:
     return Tracer(node(Op.WHERE, *[t.broadcast_to(shape).node for t in (self, x, y)]))
   def __bool__(self):
     raise TypeError("traced value does not carry data at all, you can't use it in statements or elsewhere. Use where()")
+  # reducts, shape ops, matmul
+  def permute(self, *axes): return Tracer(node(Op.PERMUTE, self.node, attr=axes))
+  @property
+  def T(self): return self.permute(*reversed(range(self.ndim)))
+  def _reduce(self, op, axis, keepdims):
+    # we asked for reduce to axis = 1
+    axes = range(self.ndim) if axis is None else (axis,) if isinstance(axis, int) else axis
+    axes = tuple(sorted(a + self.ndim if a < 0 else a for a in axes))
+    out = Tracer(node(op, self.node, attr=axes))
+    return out if keepdims else out.reshape([n for i, n in enumerate(out.shape) if i not in axes])
+  def sum(self, axis=None, keepdims=False): return self._reduce(Op.SUM, axis, keepdims)
+  def max(self, axis=None, keepdims=False): return self._reduce(Op.RMAX, axis, keepdims)
+  def mean(self, axis=None, keepdims=False):
+    total = self.sum(axis, keepdims)
+    return total * (1.0 / (prod(self.shape) // prod(total.shape)))
+  def __matmul__(self, y):
+    if self.ndim < 2 or y.ndim < 2: raise ValueError("matmul needs inputs with at least 2 dims")
+    shapes = broadcast_shapes(self.shape[:-2], y.shape[:-2])
+    x, y = self.broadcast_to(shapes + self.shape[-2:]), y.broadcast_to(shapes + y.shape[-2:])
+    b = "abcdefgh"[:len(shapes)]
+    return Tracer(node(Op.EINSUM, x.node, y.node, attr="{0}ij,{0}jk->{0}ik".format(b)))
+
 
 def _lift(x, dtype="float32") -> Tracer:
   if isinstance(x, Tracer): return x
@@ -77,3 +100,4 @@ def _unary_dim(op, x, shape) -> Tracer:
 # this fnx will return the end result node on function run tracer
 def trace(f, *inputs: Node) -> Node:
   return _lift(f(*[Tracer(v) for v in inputs])).node
+

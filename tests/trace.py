@@ -1,4 +1,4 @@
-from xpgrad.graph import show, var
+from xpgrad.graph import show, toposort, var
 from xpgrad.trace import trace
 
 def foo(x, w): return x * w + x
@@ -28,4 +28,26 @@ def baz(x):
 
 try: trace(baz, x)
 except TypeError as e: print("TypeError", e)
+
+
+def loss(x, y, w1, b1, w2, b2):
+  h = (x @ w1 + b1).tanh()
+  err = (h @ w2 + b2).sigmoid() - y
+  return (err * err).mean()
+
+x = var("x", (4, 2))
+y = var("y", (4, 1))
+w1 = var("w1", (2, 8))
+b1 = var("b1", (8,))
+w2 = var("w2", (8, 1))
+b2 = var("b2", (1,))
+out = trace(loss, x, y, w1, b1, w2, b2)
+print(out, len(toposort(out)))
+print(show(trace(lambda x: x.sum(axis=1), var("x", (2, 3)))))
+
+def chain(x):
+  for _ in range(10_001): x = x.tanh()
+  return x
+
+print(len(toposort(trace(chain, var("x", (2,))))))
 
