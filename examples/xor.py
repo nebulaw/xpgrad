@@ -2,7 +2,7 @@ import numpy as np
 
 import xpgrad.nn as nn
 from xpgrad import Tensor
-from xpgrad.optim import Optimizer, sgd
+from xpgrad.optim import Optimizer, SGD
 
 # setup data
 rng = np.random.default_rng(1337)
@@ -16,7 +16,7 @@ model = nn.Sequential(
   nn.Linear(8, 1, rng=rng),
   Tensor.sigmoid
 )
-optim = Optimizer(model.params(), sgd(lr=1.0))
+optim = SGD(model.params(), lr=1.0)
 
 # now let's teach our twinkle star how to xor
 for step in range(0, 2005):
