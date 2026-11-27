@@ -4,12 +4,7 @@ from typing import Optional, Tuple
 
 from xpgrad import autograd
 
-# TODO:
-
-# this level of abstraction is nearly killing the machine.
-# like this a lot? :3, i mean its really runtime dependent
-# code and I don't think its clean and easy to understand
-# but the beauty is inside of it. I see this way kinda
+# I think the code is in base shape for now
 
 class Function:
   def __init__(self):
@@ -18,7 +13,6 @@ class Function:
   def apply(cls, *x:"Tensor", **options) -> "Tensor":
     fn = cls()
     out = Tensor(fn.forward(*[t.data for t in x], **options))
-    out.requires_grad = any(t.requires_grad for t in x)
     # here we added the autograd flag
     if autograd.is_enabled() and any(t.requires_grad for t in x):
       fn.parents, out.grad_fn, out.requires_grad = x, fn, True
@@ -72,7 +66,7 @@ class Tensor:
   def tanh(self) -> "Tensor": return Tanh.apply(self)
   def sigmoid(self) -> "Tensor": return Sigmoid.apply(self)
   def exp(self) -> "Tensor": return Exp.apply(self)
-  def reshape(self, *shape):
+  def reshape(self, *shape) -> "Tensor":
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)): shape = tuple(shape[0])
     return Reshape.apply(self, shape=shape)
   def view(self, *shape) -> "Tensor": return self.reshape(*shape)
